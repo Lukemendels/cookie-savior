@@ -112,33 +112,45 @@ def create_packing_slips_pdf(df, cookie_cols):
 # --- MAIN APP UI ---
 st.set_page_config(page_title="Troop Cookie Logistics", layout="wide", page_icon="🍪")
 
+# 1. THE HOOK (Problem/Solution)
 st.title("🍪 Cookie Logistics Manager")
-st.markdown("### Stop counting by hand. Start delivering.")
 
-# --- NEW: CLARIFICATION BOX ---
-with st.container():
-    st.warning("""
-    **⚠️ IMPORTANT: What this tool counts**
-    * ✅ **INCLUDED:** "Girl Delivery" orders from Digital Cookie.
-    * ❌ **EXCLUDED:** "Shipped" or "Donated" orders (these are handled by the warehouse).
-    * ❌ **EXCLUDED:** Paper Card Orders (you must add these manually!).
-    """)
-
-with st.expander("ℹ️ **How to use this tool (Click to expand)**", expanded=False):
+c1, c2 = st.columns(2)
+with c1:
     st.markdown("""
-    1.  **Log in to Digital Cookie** and go to the **Orders** tab.
-    2.  Scroll to the bottom and click **"Export Orders"** (Save the CSV file).
-    3.  **Upload that file below.**
-    4.  This tool will automatically:
-        * Filter for **"Girl Delivery"** orders only.
-        * Calculate the exact boxes you need to give each Scout.
-        * Generate printable **Packing Slips** for parents.
+    ### 🛑 The Problem
+    The "Digital Cookie" website gives you a messy spreadsheet, forcing you to hand-count "Girl Delivery" orders one by one.
+    """)
+with c2:
+    st.markdown("""
+    ### ✅ The Solution
+    Upload that raw spreadsheet here. This secure tool will automatically **filter** for "Girl Delivery" orders and **calculate** the exact pick list for each Scout.
     """)
 
-st.info("🔒 **Privacy Note:** This tool processes your file in-memory. No data is saved, stored, or shared. Once you close this tab, the data is gone.")
+st.divider()
 
+# 2. THE GUARDRAILS (What it does/doesn't do)
+st.warning("""
+**⚠️ IMPORTANT NOTE:**
+* This tool **ONLY** counts Digital Orders marked for "Girl Delivery."
+* It **DOES NOT** include Paper Card orders (you must add those manually).
+* It **EXCLUDES** Shipped/Donated orders (the warehouse handles those).
+""")
+
+# 3. THE INSTRUCTIONS
+st.subheader("📝 Instructions")
+step1, step2, step3 = st.columns(3)
+with step1:
+    st.info("**Step 1**\n\nLog in to Digital Cookie and go to the **Orders** tab.")
+with step2:
+    st.info("**Step 2**\n\nScroll to the bottom and click **'Export Orders'** (Save the CSV).")
+with step3:
+    st.info("**Step 3**\n\n**Upload** that file in the box below.")
+
+# 4. THE UPLOADER
 uploaded_file = st.file_uploader("📂 Upload your 'All Orders' CSV export here", type=['csv', 'xlsx'])
 
+# --- LOGIC START ---
 if uploaded_file:
     try:
         if uploaded_file.name.endswith('.csv'):
@@ -149,6 +161,7 @@ if uploaded_file:
         clean_cols = {c: c.strip() for c in df.columns}
         df.rename(columns=clean_cols, inplace=True)
         
+        # Filter for Delivery
         delivery_cols = [c for c in df.columns if "delivery" in c.lower() or "order type" in c.lower()]
         if not delivery_cols:
             st.error("❌ **Error:** Could not find 'Delivery Method' or 'Order Type' column.")
@@ -158,7 +171,7 @@ if uploaded_file:
         delivery_mask = df[target_col].astype(str).str.contains("Girl|In-Person", case=False, na=False)
         df_delivery = df[delivery_mask].copy()
         
-        st.success(f"✅ Found **{len(df_delivery)}** Girl Delivery orders!")
+        st.success(f"✅ Success! Found **{len(df_delivery)}** Girl Delivery orders.")
 
         found_cookie_cols = []
         rename_map = {}
