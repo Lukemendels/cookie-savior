@@ -25,7 +25,15 @@ KNOWN_COOKIES = {
 # --- PDF GENERATOR 1: MASTER SUMMARY ---
 def create_summary_pdf(dataframe, title):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter))
+    # FIXED: Added explicit margins (0.5 inch all around)
+    doc = SimpleDocTemplate(
+        buffer, 
+        pagesize=landscape(letter),
+        leftMargin=0.5*inch,
+        rightMargin=0.5*inch,
+        topMargin=0.5*inch,
+        bottomMargin=0.5*inch
+    )
     elements = []
     styles = getSampleStyleSheet()
     
@@ -34,7 +42,10 @@ def create_summary_pdf(dataframe, title):
     
     data = [dataframe.columns.to_list()] + dataframe.values.tolist()
     
+    # Allow table to take up available width
+    # We leave colWidths=None so it auto-calculates based on content
     t = Table(data)
+    
     style = TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.seagreen),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -54,7 +65,15 @@ def create_summary_pdf(dataframe, title):
 # --- PDF GENERATOR 2: PACKING SLIPS ---
 def create_packing_slips_pdf(df, cookie_cols):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=portrait(letter), topMargin=0.5*inch, bottomMargin=0.5*inch)
+    # FIXED: Added explicit margins here too
+    doc = SimpleDocTemplate(
+        buffer, 
+        pagesize=portrait(letter), 
+        leftMargin=0.5*inch, 
+        rightMargin=0.5*inch, 
+        topMargin=0.5*inch, 
+        bottomMargin=0.5*inch
+    )
     elements = []
     styles = getSampleStyleSheet()
     
@@ -90,7 +109,8 @@ def create_packing_slips_pdf(df, cookie_cols):
                 
                 if order_data:
                     order_data.append(["TOTAL BOXES", total_boxes])
-                    t = Table(order_data, colWidths=[3*inch, 1*inch])
+                    # Adjusted colWidths to fit better within new margins
+                    t = Table(order_data, colWidths=[3.5*inch, 1*inch])
                     t.setStyle(TableStyle([
                         ('GRID', (0, 0), (-1, -2), 0.5, colors.grey),
                         ('LINEABOVE', (0, -1), (-1, -1), 1, colors.black),
@@ -112,7 +132,6 @@ def create_packing_slips_pdf(df, cookie_cols):
 # --- MAIN APP UI ---
 st.set_page_config(page_title="Troop Cookie Logistics", layout="wide", page_icon="🍪")
 
-# 1. THE HOOK (Problem/Solution)
 st.title("🍪 Cookie Logistics Manager")
 
 c1, c2 = st.columns(2)
@@ -129,7 +148,6 @@ with c2:
 
 st.divider()
 
-# 2. THE GUARDRAILS (What it does/doesn't do)
 st.warning("""
 **⚠️ IMPORTANT NOTE:**
 * This tool **ONLY** counts Digital Orders marked for "Girl Delivery."
@@ -137,7 +155,6 @@ st.warning("""
 * It **EXCLUDES** Shipped/Donated orders (the warehouse handles those).
 """)
 
-# 3. THE INSTRUCTIONS
 st.subheader("📝 Instructions")
 step1, step2, step3 = st.columns(3)
 with step1:
@@ -147,10 +164,8 @@ with step2:
 with step3:
     st.info("**Step 3**\n\n**Upload** that file in the box below.")
 
-# 4. THE UPLOADER
 uploaded_file = st.file_uploader("📂 Upload your 'All Orders' CSV export here", type=['csv', 'xlsx'])
 
-# --- LOGIC START ---
 if uploaded_file:
     try:
         if uploaded_file.name.endswith('.csv'):
@@ -161,7 +176,6 @@ if uploaded_file:
         clean_cols = {c: c.strip() for c in df.columns}
         df.rename(columns=clean_cols, inplace=True)
         
-        # Filter for Delivery
         delivery_cols = [c for c in df.columns if "delivery" in c.lower() or "order type" in c.lower()]
         if not delivery_cols:
             st.error("❌ **Error:** Could not find 'Delivery Method' or 'Order Type' column.")
