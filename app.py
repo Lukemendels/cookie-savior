@@ -176,7 +176,6 @@ with c2:
 
 st.warning("**⚠️ IMPORTANT:** This tool ONLY counts Digital Orders marked for 'Girl Delivery'. It EXCLUDES Shipped/Donated orders and Paper Card orders.")
 
-# --- INSTRUCTIONS RESTORED ---
 st.subheader("📝 Instructions")
 step1, step2, step3 = st.columns(3)
 with step1:
@@ -233,7 +232,6 @@ if uploaded_file:
             pivot = pivot[pivot.sum(axis=1) > 0]
             st.dataframe(pivot)
             
-            # Download Master PDF
             pdf_master = create_master_summary_pdf(pivot.reset_index(), "Master Troop Pull List")
             st.download_button("📄 Download Master List (PDF)", data=pdf_master, file_name="Master_Pull_List.pdf", mime="application/pdf")
 
@@ -268,3 +266,7 @@ if uploaded_file:
 
     except Exception as e:
         st.error(f"Error: {e}")
+
+# --- FOOTER ---
+st.divider()
+st.caption("Built with ❤️ by a Girl Scout Dad (Luke M.) | [View Source Code](https://github.com/Lukemendels/cookie-savior)")
