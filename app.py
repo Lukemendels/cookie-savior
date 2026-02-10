@@ -5,6 +5,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter, landscape, portrait
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, KeepTogether
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.units import inch
 
 # --- CONFIGURATION ---
@@ -25,7 +26,8 @@ KNOWN_COOKIES = {
 # --- PDF GENERATOR 1: MASTER SUMMARY ---
 def create_summary_pdf(dataframe, title):
     buffer = io.BytesIO()
-    # FIXED: Added explicit margins (0.5 inch all around)
+    # Landscape Letter = 11 inches wide. 
+    # Margins 0.5 each side -> 10 inches usable width.
     doc = SimpleDocTemplate(
         buffer, 
         pagesize=landscape(letter),
@@ -37,22 +39,65 @@ def create_summary_pdf(dataframe, title):
     elements = []
     styles = getSampleStyleSheet()
     
+    # Title
     elements.append(Paragraph(title, styles['Title']))
     elements.append(Spacer(1, 12))
     
-    data = [dataframe.columns.to_list()] + dataframe.values.tolist()
+    # --- DYNAMIC COLUMN SIZING ---
+    # We have 10 inches of width.
+    # Name Column: Give it 1.5 inches (plenty for "Rosemary").
+    # Cookie Columns: Divide the remaining 8.5 inches by the number of cookies.
     
-    # Allow table to take up available width
-    # We leave colWidths=None so it auto-calculates based on content
-    t = Table(data)
+    total_page_width = 10.0 * inch
+    name_col_width = 1.5 * inch
+    
+    num_cookie_cols = len(dataframe.columns) - 1 # Subtract Name column
+    if num_cookie_cols > 0:
+        remaining_width = total_page_width - name_col_width
+        cookie_col_width = remaining_width / num_cookie_cols
+    else:
+        cookie_col_width = 1 * inch # Fallback
+        
+    col_widths = [name_col_width] + [cookie_col_width] * num_cookie_cols
+
+    # --- HEADER FORMATTING ---
+    # Create a style for headers that centers text and wraps it (fontSize 9 to fit)
+    header_style = ParagraphStyle(
+        'Header',
+        parent=styles['Normal'],
+        alignment=TA_CENTER,
+        fontSize=9,
+        textColor=colors.whitesmoke,
+        fontName='Helvetica-Bold'
+    )
+
+    # Convert raw dataframe data to a list of lists
+    raw_data = [dataframe.columns.to_list()] + dataframe.values.tolist()
+    
+    # Process the Header Row: Wrap strings in Paragraphs so they wrap lines
+    formatted_data = []
+    
+    # Headers
+    headers = []
+    for col_name in raw_data[0]:
+        # Wrap header text in Paragraph so it splits lines (e.g. "Adventure-\nfuls")
+        headers.append(Paragraph(str(col_name), header_style))
+    formatted_data.append(headers)
+    
+    # Data Rows (Keep as simple strings/numbers for clean look)
+    formatted_data.extend(raw_data[1:])
+    
+    # Create Table with explicit widths
+    t = Table(formatted_data, colWidths=col_widths, repeatRows=1)
     
     style = TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.seagreen),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),     # Center all data
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),    # Vertically center
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('FONTSIZE', (0, 1), (-1, -1), 10),        # Data font size
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+        ('TOPPADDING', (0, 0), (-1, 0), 8),
         ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
         ('GRID', (0, 0), (-1, -1), 1, colors.black),
     ])
@@ -65,7 +110,6 @@ def create_summary_pdf(dataframe, title):
 # --- PDF GENERATOR 2: PACKING SLIPS ---
 def create_packing_slips_pdf(df, cookie_cols):
     buffer = io.BytesIO()
-    # FIXED: Added explicit margins here too
     doc = SimpleDocTemplate(
         buffer, 
         pagesize=portrait(letter), 
@@ -109,7 +153,6 @@ def create_packing_slips_pdf(df, cookie_cols):
                 
                 if order_data:
                     order_data.append(["TOTAL BOXES", total_boxes])
-                    # Adjusted colWidths to fit better within new margins
                     t = Table(order_data, colWidths=[3.5*inch, 1*inch])
                     t.setStyle(TableStyle([
                         ('GRID', (0, 0), (-1, -2), 0.5, colors.grey),
