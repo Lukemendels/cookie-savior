@@ -176,6 +176,16 @@ with c2:
 
 st.warning("**⚠️ IMPORTANT:** This tool ONLY counts Digital Orders marked for 'Girl Delivery'. It EXCLUDES Shipped/Donated orders and Paper Card orders.")
 
+# --- INSTRUCTIONS RESTORED ---
+st.subheader("📝 Instructions")
+step1, step2, step3 = st.columns(3)
+with step1:
+    st.info("**Step 1**\n\nLog in to Digital Cookie and go to the **Orders** tab.")
+with step2:
+    st.info("**Step 2**\n\nScroll to the bottom and click **'Export Orders'** (Save the CSV).")
+with step3:
+    st.info("**Step 3**\n\n**Upload** that file in the box below.")
+
 uploaded_file = st.file_uploader("📂 Upload 'All Orders' CSV", type=['csv', 'xlsx'])
 
 if uploaded_file:
@@ -233,23 +243,16 @@ if uploaded_file:
             st.markdown("Download a ZIP file containing separate PDFs for each girl. Email these directly to parents.")
             
             if girl_col:
-                # Create ZIP in memory
                 zip_buffer = io.BytesIO()
                 with zipfile.ZipFile(zip_buffer, "w") as zf:
                     unique_girls = df_delivery[girl_col].unique()
                     
                     progress_bar = st.progress(0)
                     for i, girl in enumerate(unique_girls):
-                        # Filter data for this girl
                         girl_df = df_delivery[df_delivery[girl_col] == girl]
-                        
-                        # Generate her PDF
                         pdf_bytes = create_scout_packet(girl, girl_df, found_cookie_cols, cust_col)
-                        
-                        # Add to ZIP
                         clean_name = "".join(x for x in str(girl) if x.isalnum() or x in " _-")
                         zf.writestr(f"{clean_name}_Cookie_Packet.pdf", pdf_bytes.getvalue())
-                        
                         progress_bar.progress((i + 1) / len(unique_girls))
                 
                 zip_buffer.seek(0)
