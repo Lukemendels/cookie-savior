@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import io
+import zipfile
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter, landscape, portrait
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, KeepTogether
@@ -23,279 +24,244 @@ KNOWN_COOKIES = {
     "Gluten Free": ["Gluten Free"],
 }
 
-# --- PDF GENERATOR 1: MASTER SUMMARY ---
-def create_summary_pdf(dataframe, title):
+# --- PDF 1: MASTER SUMMARY (For Troop Leader Only) ---
+def create_master_summary_pdf(dataframe, title):
     buffer = io.BytesIO()
-    # Landscape Letter = 11 inches wide. 
-    # Margins 0.5 each side -> 10 inches usable width.
     doc = SimpleDocTemplate(
         buffer, 
         pagesize=landscape(letter),
-        leftMargin=0.5*inch,
-        rightMargin=0.5*inch,
-        topMargin=0.5*inch,
-        bottomMargin=0.5*inch
+        leftMargin=0.5*inch, rightMargin=0.5*inch, topMargin=0.5*inch, bottomMargin=0.5*inch
     )
     elements = []
     styles = getSampleStyleSheet()
     
-    # Title
     elements.append(Paragraph(title, styles['Title']))
     elements.append(Spacer(1, 12))
     
-    # --- DYNAMIC COLUMN SIZING ---
-    # We have 10 inches of width.
-    # Name Column: Give it 1.5 inches (plenty for "Rosemary").
-    # Cookie Columns: Divide the remaining 8.5 inches by the number of cookies.
-    
+    # Dynamic Widths
     total_page_width = 10.0 * inch
     name_col_width = 1.5 * inch
-    
-    num_cookie_cols = len(dataframe.columns) - 1 # Subtract Name column
+    num_cookie_cols = len(dataframe.columns) - 1
     if num_cookie_cols > 0:
-        remaining_width = total_page_width - name_col_width
-        cookie_col_width = remaining_width / num_cookie_cols
+        cookie_col_width = (total_page_width - name_col_width) / num_cookie_cols
     else:
-        cookie_col_width = 1 * inch # Fallback
-        
+        cookie_col_width = 1 * inch
     col_widths = [name_col_width] + [cookie_col_width] * num_cookie_cols
 
-    # --- HEADER FORMATTING ---
-    # Create a style for headers that centers text and wraps it (fontSize 9 to fit)
-    header_style = ParagraphStyle(
-        'Header',
-        parent=styles['Normal'],
-        alignment=TA_CENTER,
-        fontSize=9,
-        textColor=colors.whitesmoke,
-        fontName='Helvetica-Bold'
-    )
-
-    # Convert raw dataframe data to a list of lists
-    raw_data = [dataframe.columns.to_list()] + dataframe.values.tolist()
+    # Header Styling
+    header_style = ParagraphStyle('Header', parent=styles['Normal'], alignment=TA_CENTER, fontSize=9, textColor=colors.whitesmoke, fontName='Helvetica-Bold')
     
-    # Process the Header Row: Wrap strings in Paragraphs so they wrap lines
+    raw_data = [dataframe.columns.to_list()] + dataframe.values.tolist()
     formatted_data = []
     
     # Headers
-    headers = []
-    for col_name in raw_data[0]:
-        # Wrap header text in Paragraph so it splits lines (e.g. "Adventure-\nfuls")
-        headers.append(Paragraph(str(col_name), header_style))
+    headers = [Paragraph(str(col), header_style) for col in raw_data[0]]
     formatted_data.append(headers)
-    
-    # Data Rows (Keep as simple strings/numbers for clean look)
     formatted_data.extend(raw_data[1:])
     
-    # Create Table with explicit widths
     t = Table(formatted_data, colWidths=col_widths, repeatRows=1)
-    
-    style = TableStyle([
+    t.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.seagreen),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),     # Center all data
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),    # Vertically center
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 1), (-1, -1), 10),        # Data font size
+        ('FONTSIZE', (0, 1), (-1, -1), 10),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
         ('TOPPADDING', (0, 0), (-1, 0), 8),
         ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
         ('GRID', (0, 0), (-1, -1), 1, colors.black),
-    ])
-    t.setStyle(style)
+    ]))
     elements.append(t)
     doc.build(elements)
     buffer.seek(0)
     return buffer
 
-# --- PDF GENERATOR 2: PACKING SLIPS ---
-def create_packing_slips_pdf(df, cookie_cols):
+# --- PDF 2: INDIVIDUAL SCOUT PACKET (Summary + Slips) ---
+def create_scout_packet(girl_name, girl_df, cookie_cols, cust_col):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, 
-        pagesize=portrait(letter), 
-        leftMargin=0.5*inch, 
-        rightMargin=0.5*inch, 
-        topMargin=0.5*inch, 
-        bottomMargin=0.5*inch
+        pagesize=portrait(letter),
+        leftMargin=0.5*inch, rightMargin=0.5*inch, topMargin=0.5*inch, bottomMargin=0.5*inch
     )
     elements = []
     styles = getSampleStyleSheet()
     
+    # --- PAGE 1: PICKUP SUMMARY ---
+    elements.append(Paragraph(f"Pickup Order For: {girl_name}", styles['Title']))
+    elements.append(Spacer(1, 12))
+    elements.append(Paragraph("This is the total inventory you need to collect from the Troop Leader.", styles['Normal']))
+    elements.append(Spacer(1, 12))
+
+    # Calculate Totals
+    total_row = girl_df[cookie_cols].sum()
+    total_row = total_row[total_row > 0] # Only show what she needs
+    
+    if total_row.empty:
+        elements.append(Paragraph("No cookies needed!", styles['Normal']))
+    else:
+        # Create a vertical list table for clarity
+        data = [["Cookie Type", "Qty"]]
+        total_boxes = 0
+        for cookie, count in total_row.items():
+            data.append([cookie, int(count)])
+            total_boxes += int(count)
+        data.append(["TOTAL BOXES", total_boxes])
+
+        t = Table(data, colWidths=[3*inch, 1*inch])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (1, 0), colors.seagreen),
+            ('TEXTCOLOR', (0, 0), (1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey), # Total Row
+        ]))
+        elements.append(t)
+
+    # --- PAGE 2+: CUSTOMER SLIPS ---
+    elements.append(PageBreak())
+    
     slip_header = ParagraphStyle('SlipHeader', parent=styles['Heading3'], fontSize=12, spaceAfter=4)
     normal_style = ParagraphStyle('Normal', parent=styles['Normal'], fontSize=10)
     
-    girl_cols = [c for c in df.columns if "girl" in c.lower() and "name" in c.lower()]
-    girl_col = girl_cols[0] if girl_cols else None
-    cust_cols = [c for c in df.columns if "customer" in c.lower()]
-    cust_col = cust_cols[0] if cust_cols else "Customer"
+    elements.append(Paragraph(f"Customer Packing Slips: {girl_name}", styles['Title']))
+    elements.append(Paragraph("Cut these out and tape them to your delivery bags.", styles['Normal']))
+    elements.append(Spacer(1, 20))
 
-    if girl_col:
-        girls = df[girl_col].unique()
-        for girl in girls:
-            elements.append(Paragraph(f"PACKING SLIPS FOR: {girl}", styles['Title']))
-            elements.append(Spacer(1, 12))
-            
-            girl_orders = df[df[girl_col] == girl]
-            for index, row in girl_orders.iterrows():
-                content = []
-                customer_name = row[cust_col] if cust_col in df.columns else "Unknown Customer"
-                
-                content.append(Paragraph(f"Customer: <b>{customer_name}</b>", slip_header))
-                content.append(Spacer(1, 4))
-                
-                order_data = []
-                total_boxes = 0
-                for col in cookie_cols:
-                    count = row[col]
-                    if count > 0:
-                        order_data.append([col, int(count)])
-                        total_boxes += int(count)
-                
-                if order_data:
-                    order_data.append(["TOTAL BOXES", total_boxes])
-                    t = Table(order_data, colWidths=[3.5*inch, 1*inch])
-                    t.setStyle(TableStyle([
-                        ('GRID', (0, 0), (-1, -2), 0.5, colors.grey),
-                        ('LINEABOVE', (0, -1), (-1, -1), 1, colors.black),
-                        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-                        ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
-                    ]))
-                    content.append(t)
-                
-                content.append(Spacer(1, 15))
-                content.append(Paragraph("- - - - - - - - - CUT HERE - - - - - - - - -", normal_style))
-                content.append(Spacer(1, 15))
-                elements.append(KeepTogether(content))
-            elements.append(PageBreak())
-
+    for index, row in girl_df.iterrows():
+        content = []
+        customer_name = row[cust_col] if cust_col in girl_df.columns else "Unknown Customer"
+        
+        content.append(Paragraph(f"Customer: <b>{customer_name}</b>", slip_header))
+        content.append(Spacer(1, 4))
+        
+        order_data = []
+        total_boxes = 0
+        for col in cookie_cols:
+            count = row[col]
+            if count > 0:
+                order_data.append([col, int(count)])
+                total_boxes += int(count)
+        
+        if order_data:
+            order_data.append(["TOTAL BOXES", total_boxes])
+            t = Table(order_data, colWidths=[3.5*inch, 1*inch])
+            t.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -2), 0.5, colors.grey),
+                ('LINEABOVE', (0, -1), (-1, -1), 1, colors.black),
+                ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+                ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
+            ]))
+            content.append(t)
+        
+        content.append(Spacer(1, 15))
+        content.append(Paragraph("- - - - - - - - - CUT HERE - - - - - - - - -", normal_style))
+        content.append(Spacer(1, 15))
+        elements.append(KeepTogether(content))
+        
     doc.build(elements)
     buffer.seek(0)
     return buffer
 
-# --- MAIN APP UI ---
+# --- MAIN APP ---
 st.set_page_config(page_title="Troop Cookie Logistics", layout="wide", page_icon="🍪")
-
 st.title("🍪 Cookie Logistics Manager")
 
 c1, c2 = st.columns(2)
 with c1:
-    st.markdown("""
-    ### 🛑 The Problem
-    The "Digital Cookie" website gives you a messy spreadsheet, forcing you to hand-count "Girl Delivery" orders one by one.
-    """)
+    st.markdown("### 🛑 The Problem\nThe \"Digital Cookie\" website gives you a messy spreadsheet, forcing you to hand-count \"Girl Delivery\" orders.")
 with c2:
-    st.markdown("""
-    ### ✅ The Solution
-    Upload that raw spreadsheet here. This secure tool will automatically **filter** for "Girl Delivery" orders and **calculate** the exact pick list for each Scout.
-    """)
+    st.markdown("### ✅ The Solution\nUpload that raw spreadsheet here. This tool filters for \"Girl Delivery\" and generates individual PDF packets for each Scout.")
 
-st.divider()
+st.warning("**⚠️ IMPORTANT:** This tool ONLY counts Digital Orders marked for 'Girl Delivery'. It EXCLUDES Shipped/Donated orders and Paper Card orders.")
 
-st.warning("""
-**⚠️ IMPORTANT NOTE:**
-* This tool **ONLY** counts Digital Orders marked for "Girl Delivery."
-* It **DOES NOT** include Paper Card orders (you must add those manually).
-* It **EXCLUDES** Shipped/Donated orders (the warehouse handles those).
-""")
-
-st.subheader("📝 Instructions")
-step1, step2, step3 = st.columns(3)
-with step1:
-    st.info("**Step 1**\n\nLog in to Digital Cookie and go to the **Orders** tab.")
-with step2:
-    st.info("**Step 2**\n\nScroll to the bottom and click **'Export Orders'** (Save the CSV).")
-with step3:
-    st.info("**Step 3**\n\n**Upload** that file in the box below.")
-
-uploaded_file = st.file_uploader("📂 Upload your 'All Orders' CSV export here", type=['csv', 'xlsx'])
+uploaded_file = st.file_uploader("📂 Upload 'All Orders' CSV", type=['csv', 'xlsx'])
 
 if uploaded_file:
     try:
+        # Load & Clean
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file)
         else:
             df = pd.read_excel(uploaded_file)
-            
-        clean_cols = {c: c.strip() for c in df.columns}
-        df.rename(columns=clean_cols, inplace=True)
+        df.rename(columns={c: c.strip() for c in df.columns}, inplace=True)
         
+        # Filter Delivery
         delivery_cols = [c for c in df.columns if "delivery" in c.lower() or "order type" in c.lower()]
-        if not delivery_cols:
-            st.error("❌ **Error:** Could not find 'Delivery Method' or 'Order Type' column.")
-            st.stop()
-            
-        target_col = delivery_cols[0]
-        delivery_mask = df[target_col].astype(str).str.contains("Girl|In-Person", case=False, na=False)
-        df_delivery = df[delivery_mask].copy()
+        if not delivery_cols: st.stop()
+        df_delivery = df[df[delivery_cols[0]].astype(str).str.contains("Girl|In-Person", case=False, na=False)].copy()
         
-        st.success(f"✅ Success! Found **{len(df_delivery)}** Girl Delivery orders.")
+        st.success(f"✅ Processing **{len(df_delivery)}** Girl Delivery orders.")
 
+        # Identify Cookies
         found_cookie_cols = []
         rename_map = {}
-        for clean_name, subtitles in KNOWN_COOKIES.items():
-            for sub in subtitles:
+        for clean, subs in KNOWN_COOKIES.items():
+            for sub in subs:
                 matches = [c for c in df.columns if sub.lower() in c.lower()]
-                for match in matches:
-                    if match not in found_cookie_cols:
-                        found_cookie_cols.append(match)
-                        rename_map[match] = clean_name
-        
-        if not found_cookie_cols:
-            st.error("❌ **Error:** No cookie columns found!")
-            st.stop()
-
+                for m in matches:
+                    if m not in found_cookie_cols:
+                        found_cookie_cols.append(m)
+                        rename_map[m] = clean
         df_delivery[found_cookie_cols] = df_delivery[found_cookie_cols].fillna(0)
+        
+        # Identify Names/Customers
+        girl_cols = [c for c in df.columns if "girl" in c.lower() and "name" in c.lower()]
+        girl_col = girl_cols[0] if girl_cols else df_delivery.index.name
+        cust_cols = [c for c in df.columns if "customer" in c.lower()]
+        cust_col = cust_cols[0] if cust_cols else "Customer"
 
-        money_col = None
-        possible_money = [c for c in df_delivery.columns if "amount" in c.lower() or "total" in c.lower()]
-        if possible_money:
-            money_col = possible_money[0]
-            if df_delivery[money_col].dtype == object:
-                df_delivery[money_col] = df_delivery[money_col].astype(str).str.replace('$', '').str.replace(',', '').astype(float)
+        # --- UI TABS ---
+        tab1, tab2 = st.tabs(["📦 Troop Master List", "✉️ Scout Packets"])
 
-        tab1, tab2 = st.tabs(["📦 Troop Master List", "👧 Scout Pick Lists"])
-
+        # TAB 1: MASTER LIST
         with tab1:
-            st.subheader("Master Inventory Pull List")
-            st.markdown("*Use this to pull cases from the Troop Cupboard.*")
-            total_needed = df_delivery[found_cookie_cols].sum().rename(index=rename_map)
-            total_needed = total_needed[total_needed > 0].sort_values(ascending=False)
-            
-            c1, c2 = st.columns([1, 2])
-            with c1:
-                st.dataframe(total_needed, height=400)
-            with c2:
-                st.metric("Total Boxes to Move", int(total_needed.sum()))
-                if money_col:
-                    total_val = df_delivery[money_col].sum()
-                    st.metric("Total Digital Value", f"${total_val:,.2f}")
-
-        with tab2:
-            st.subheader("Per-Girl Pick List")
-            st.markdown("*Use this to distribute cookies to parents.*")
-            name_cols = [c for c in df.columns if "girl" in c.lower() and "name" in c.lower()]
-            grouper = name_cols[0] if name_cols else df_delivery.index
-            pivot = df_delivery.groupby(grouper)[found_cookie_cols].sum()
-            
-            if money_col:
-                 money_pivot = df_delivery.groupby(grouper)[money_col].sum()
-                 pivot["TOTAL VALUE ($)"] = money_pivot.apply(lambda x: f"${x:,.2f}")
-
+            st.subheader("Master Inventory Pull List (Troop Leader Only)")
+            pivot = df_delivery.groupby(girl_col)[found_cookie_cols].sum()
             pivot = pivot.rename(columns=rename_map)
-            pivot = pivot[pivot[list(rename_map.values())].sum(axis=1) > 0]
-            st.dataframe(pivot, use_container_width=True)
+            pivot = pivot[pivot.sum(axis=1) > 0]
+            st.dataframe(pivot)
+            
+            # Download Master PDF
+            pdf_master = create_master_summary_pdf(pivot.reset_index(), "Master Troop Pull List")
+            st.download_button("📄 Download Master List (PDF)", data=pdf_master, file_name="Master_Pull_List.pdf", mime="application/pdf")
 
-        st.divider()
-        st.subheader("🖨️ Print & Go")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.info("For the Troop Leader")
-            pdf_summary = create_summary_pdf(pivot.reset_index(), "Girl Scout Cookie Pick List") 
-            st.download_button("📄 Download Master Pick List (PDF)", data=pdf_summary, file_name="Master_Pick_List.pdf", mime="application/pdf")
-        with c2:
-            st.info("For the Parents")
-            pdf_slips = create_packing_slips_pdf(df_delivery, found_cookie_cols)
-            st.download_button("✂️ Download Customer Packing Slips (PDF)", data=pdf_slips, file_name="Customer_Packing_Slips.pdf", mime="application/pdf")
+        # TAB 2: INDIVIDUAL PACKETS
+        with tab2:
+            st.subheader("Individual Scout Packets")
+            st.markdown("Download a ZIP file containing separate PDFs for each girl. Email these directly to parents.")
+            
+            if girl_col:
+                # Create ZIP in memory
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, "w") as zf:
+                    unique_girls = df_delivery[girl_col].unique()
+                    
+                    progress_bar = st.progress(0)
+                    for i, girl in enumerate(unique_girls):
+                        # Filter data for this girl
+                        girl_df = df_delivery[df_delivery[girl_col] == girl]
+                        
+                        # Generate her PDF
+                        pdf_bytes = create_scout_packet(girl, girl_df, found_cookie_cols, cust_col)
+                        
+                        # Add to ZIP
+                        clean_name = "".join(x for x in str(girl) if x.isalnum() or x in " _-")
+                        zf.writestr(f"{clean_name}_Cookie_Packet.pdf", pdf_bytes.getvalue())
+                        
+                        progress_bar.progress((i + 1) / len(unique_girls))
+                
+                zip_buffer.seek(0)
+                
+                st.download_button(
+                    label="📦 Download All Scout Packets (ZIP)",
+                    data=zip_buffer,
+                    file_name="Scout_Cookie_Packets.zip",
+                    mime="application/zip",
+                    type="primary"
+                )
+                st.success(f"Ready to download packets for {len(unique_girls)} scouts!")
 
     except Exception as e:
-        st.error(f"An error occurred: {e}")
+        st.error(f"Error: {e}")
