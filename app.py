@@ -32,12 +32,9 @@ def create_summary_pdf(dataframe, title):
     elements.append(Paragraph(title, styles['Title']))
     elements.append(Spacer(1, 12))
     
-    # Data Prep
     data = [dataframe.columns.to_list()] + dataframe.values.tolist()
     
-    # Auto-adjust column widths if possible, otherwise let ReportLab calculate
     t = Table(data)
-    
     style = TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.seagreen),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -61,14 +58,11 @@ def create_packing_slips_pdf(df, cookie_cols):
     elements = []
     styles = getSampleStyleSheet()
     
-    # Custom Styles
     slip_header = ParagraphStyle('SlipHeader', parent=styles['Heading3'], fontSize=12, spaceAfter=4)
     normal_style = ParagraphStyle('Normal', parent=styles['Normal'], fontSize=10)
     
-    # Find Columns
     girl_cols = [c for c in df.columns if "girl" in c.lower() and "name" in c.lower()]
     girl_col = girl_cols[0] if girl_cols else None
-    
     cust_cols = [c for c in df.columns if "customer" in c.lower()]
     cust_col = cust_cols[0] if cust_cols else "Customer"
 
@@ -79,16 +73,13 @@ def create_packing_slips_pdf(df, cookie_cols):
             elements.append(Spacer(1, 12))
             
             girl_orders = df[df[girl_col] == girl]
-            
             for index, row in girl_orders.iterrows():
                 content = []
                 customer_name = row[cust_col] if cust_col in df.columns else "Unknown Customer"
                 
-                # Header
                 content.append(Paragraph(f"Customer: <b>{customer_name}</b>", slip_header))
                 content.append(Spacer(1, 4))
                 
-                # Table Data
                 order_data = []
                 total_boxes = 0
                 for col in cookie_cols:
@@ -111,9 +102,7 @@ def create_packing_slips_pdf(df, cookie_cols):
                 content.append(Spacer(1, 15))
                 content.append(Paragraph("- - - - - - - - - CUT HERE - - - - - - - - -", normal_style))
                 content.append(Spacer(1, 15))
-
                 elements.append(KeepTogether(content))
-
             elements.append(PageBreak())
 
     doc.build(elements)
@@ -123,24 +112,31 @@ def create_packing_slips_pdf(df, cookie_cols):
 # --- MAIN APP UI ---
 st.set_page_config(page_title="Troop Cookie Logistics", layout="wide", page_icon="🍪")
 
-# HEADER & INSTRUCTIONS
 st.title("🍪 Cookie Logistics Manager")
 st.markdown("### Stop counting by hand. Start delivering.")
 
-with st.expander("ℹ️ **How to use this tool (Click to expand)**", expanded=True):
+# --- NEW: CLARIFICATION BOX ---
+with st.container():
+    st.warning("""
+    **⚠️ IMPORTANT: What this tool counts**
+    * ✅ **INCLUDED:** "Girl Delivery" orders from Digital Cookie.
+    * ❌ **EXCLUDED:** "Shipped" or "Donated" orders (these are handled by the warehouse).
+    * ❌ **EXCLUDED:** Paper Card Orders (you must add these manually!).
+    """)
+
+with st.expander("ℹ️ **How to use this tool (Click to expand)**", expanded=False):
     st.markdown("""
     1.  **Log in to Digital Cookie** and go to the **Orders** tab.
     2.  Scroll to the bottom and click **"Export Orders"** (Save the CSV file).
     3.  **Upload that file below.**
     4.  This tool will automatically:
-        * Filter for **"Girl Delivery"** orders only (ignoring Shipped/Donated).
+        * Filter for **"Girl Delivery"** orders only.
         * Calculate the exact boxes you need to give each Scout.
-        * Generate printable **Packing Slips** for parents to tape to bags.
+        * Generate printable **Packing Slips** for parents.
     """)
 
 st.info("🔒 **Privacy Note:** This tool processes your file in-memory. No data is saved, stored, or shared. Once you close this tab, the data is gone.")
 
-# FILE UPLOADER
 uploaded_file = st.file_uploader("📂 Upload your 'All Orders' CSV export here", type=['csv', 'xlsx'])
 
 if uploaded_file:
@@ -153,10 +149,9 @@ if uploaded_file:
         clean_cols = {c: c.strip() for c in df.columns}
         df.rename(columns=clean_cols, inplace=True)
         
-        # Filter for Delivery
         delivery_cols = [c for c in df.columns if "delivery" in c.lower() or "order type" in c.lower()]
         if not delivery_cols:
-            st.error("❌ **Error:** Could not find 'Delivery Method' or 'Order Type' column. Please check the CSV.")
+            st.error("❌ **Error:** Could not find 'Delivery Method' or 'Order Type' column.")
             st.stop()
             
         target_col = delivery_cols[0]
@@ -165,7 +160,6 @@ if uploaded_file:
         
         st.success(f"✅ Found **{len(df_delivery)}** Girl Delivery orders!")
 
-        # Identify Cookies
         found_cookie_cols = []
         rename_map = {}
         for clean_name, subtitles in KNOWN_COOKIES.items():
@@ -177,28 +171,23 @@ if uploaded_file:
                         rename_map[match] = clean_name
         
         if not found_cookie_cols:
-            st.error("❌ **Error:** No cookie columns found! Are you sure this is the right file?")
+            st.error("❌ **Error:** No cookie columns found!")
             st.stop()
 
         df_delivery[found_cookie_cols] = df_delivery[found_cookie_cols].fillna(0)
 
-        # Money Logic
         money_col = None
         possible_money = [c for c in df_delivery.columns if "amount" in c.lower() or "total" in c.lower()]
         if possible_money:
             money_col = possible_money[0]
-            # Clean currency string to float
             if df_delivery[money_col].dtype == object:
                 df_delivery[money_col] = df_delivery[money_col].astype(str).str.replace('$', '').str.replace(',', '').astype(float)
 
-        # --- TABS ---
         tab1, tab2 = st.tabs(["📦 Troop Master List", "👧 Scout Pick Lists"])
 
         with tab1:
             st.subheader("Master Inventory Pull List")
             st.markdown("*Use this to pull cases from the Troop Cupboard.*")
-            
-            # Pivot 1: Total needed by Troop
             total_needed = df_delivery[found_cookie_cols].sum().rename(index=rename_map)
             total_needed = total_needed[total_needed > 0].sort_values(ascending=False)
             
@@ -214,35 +203,25 @@ if uploaded_file:
         with tab2:
             st.subheader("Per-Girl Pick List")
             st.markdown("*Use this to distribute cookies to parents.*")
-            
             name_cols = [c for c in df.columns if "girl" in c.lower() and "name" in c.lower()]
             grouper = name_cols[0] if name_cols else df_delivery.index
-            
             pivot = df_delivery.groupby(grouper)[found_cookie_cols].sum()
             
-            # Add Money to Pivot
             if money_col:
                  money_pivot = df_delivery.groupby(grouper)[money_col].sum()
                  pivot["TOTAL VALUE ($)"] = money_pivot.apply(lambda x: f"${x:,.2f}")
 
             pivot = pivot.rename(columns=rename_map)
-            # Filter rows with 0 boxes
-            # (Note: we use numeric_only=True to ignore the string formatted money column for the sum check)
             pivot = pivot[pivot[list(rename_map.values())].sum(axis=1) > 0]
-            
             st.dataframe(pivot, use_container_width=True)
 
-        # --- DOWNLOADS ---
         st.divider()
         st.subheader("🖨️ Print & Go")
-        
         c1, c2 = st.columns(2)
-        
         with c1:
             st.info("For the Troop Leader")
             pdf_summary = create_summary_pdf(pivot.reset_index(), "Girl Scout Cookie Pick List") 
             st.download_button("📄 Download Master Pick List (PDF)", data=pdf_summary, file_name="Master_Pick_List.pdf", mime="application/pdf")
-
         with c2:
             st.info("For the Parents")
             pdf_slips = create_packing_slips_pdf(df_delivery, found_cookie_cols)
